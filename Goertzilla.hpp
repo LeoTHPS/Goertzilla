@@ -18,27 +18,39 @@ class Goertzilla
 	Goertzilla() = delete;
 
 public:
+	enum class WindowTypes
+	{
+		Hamming,
+		BlackmanNuttall
+	};
+
+	enum class WindowModes
+	{
+		Periodic,
+		Symmetric
+	};
+
 	template<typename T>
 	static auto DTMF(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
-		double frequency[DTMF_FREQUENCY_COUNT];
-		size_t frequency_max_offset[2]    = { 0, 0 };
-		double frequency_max_magnitude[2] = { __DBL_MIN__, __DBL_MIN__ };
+		std::complex<double> frequency[DTMF_FREQUENCY_COUNT];
+		size_t               frequency_max_offset[2]    = { 0, 0 };
+		double               frequency_max_magnitude[2] = { __DBL_MIN__, __DBL_MIN__ };
 
 		Goertzel(buffer, size, sample_rate, channel, channel_count, DTMF_FREQUENCY, frequency);
 
 		for (size_t i = 0, j = 4; i < 4; ++i, ++j)
 		{
-			if (frequency[i] > frequency_max_magnitude[0])
+			if (auto magnitude = GetMagnitude(frequency[i]); magnitude > frequency_max_magnitude[0])
 			{
 				frequency_max_offset[0]    = i;
-				frequency_max_magnitude[0] = frequency[i];
+				frequency_max_magnitude[0] = magnitude;
 			}
 
-			if (frequency[j] > frequency_max_magnitude[1])
+			if (auto magnitude = GetMagnitude(frequency[j]); magnitude > frequency_max_magnitude[1])
 			{
 				frequency_max_offset[1]    = j;
-				frequency_max_magnitude[1] = frequency[j];
+				frequency_max_magnitude[1] = magnitude;
 			}
 		}
 
@@ -50,17 +62,17 @@ public:
 	template<typename T>
 	static auto CTCSS(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
-		double frequency[CTCSS_FREQUENCY_COUNT];
-		size_t frequency_max_offset    = 0;
-		double frequency_max_magnitude = __DBL_MIN__;
+		std::complex<double> frequency[CTCSS_FREQUENCY_COUNT];
+		size_t               frequency_max_offset    = 0;
+		double               frequency_max_magnitude = __DBL_MIN__;
 
 		Goertzel(buffer, size, sample_rate, channel, channel_count, CTCSS_FREQUENCY, frequency);
 
 		for (size_t i = 0; i < CTCSS_FREQUENCY_COUNT; ++i)
-			if (frequency[i] > frequency_max_magnitude)
+			if (auto magnitude = GetMagnitude(frequency[i]); magnitude > frequency_max_magnitude)
 			{
 				frequency_max_offset    = i;
-				frequency_max_magnitude = frequency[i];
+				frequency_max_magnitude = magnitude;
 			}
 
 		magnitude = frequency_max_magnitude;
@@ -69,34 +81,27 @@ public:
 	}
 
 	template<typename T>
-	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double frequency, double& magnitude)
+	static void Window(T* buffer, size_t size, WindowTypes type, WindowModes mode)
 	{
-		double f[1] = { frequency };
-		double m[1] = {};
+		size_t n = size;
 
-		Goertzel(buffer, size, sample_rate, channel, channel_count, f, m);
+		if (mode == WindowModes::Periodic)
+			--n;
 
-		magnitude = m[0];
-	}
-	template<typename T, size_t S>
-	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], double(&magnitude)[S])
-	{
-		double q[S][3]  = {};
-		double coeff[S] = {};
+		switch (type)
+		{
+			case WindowTypes::Hamming:
+				for (size_t i = 0; i < size; ++i)
+					buffer[i] *= 0.54 - 0.46 * cos(2 * M_PI * i / n);
+				break;
 
-		for (size_t i = 0; i < S; ++i)
-			coeff[i] = 2 * std::cos((PI2 / size) * (0.5 + (size * frequency[i] / sample_rate)));
+			case WindowTypes::BlackmanNuttall:
+				static constexpr double A[4] = { 0.3635819, 0.4891775, 0.1365995, 0.0106411 };
 
-		for (size_t i = 0; i < size; ++i)
-			for (size_t j = 0; j < S; ++j)
-			{
-				q[j][0] = coeff[j] * q[j][1] - q[j][2] + buffer[i];
-				q[j][2] = q[j][1];
-				q[j][1] = q[j][0];
-			}
-
-		for (size_t i = 0; i < S; ++i)
-			magnitude[i] = q[i][1] * q[i][1] + q[i][2] * q[i][2] - q[i][1] * q[i][2] * coeff[i];
+				for (size_t i = 0; i < size; ++i)
+					buffer[i] *= A[0] - A[1] * cos((2 * PI * size) / n) + A[1] * cos((4 * PI * size) / n) - A[2] * cos((6 * PI * size) / n);
+				break;
+		}
 	}
 
 	template<typename T>
@@ -115,6 +120,7 @@ public:
 		double q[S][3]  = {};
 		double coeff[S] = {};
 		double omega[S] = {};
+		double scale    = size / 2.0;
 
 		for (size_t i = 0; i < S; ++i)
 		{
@@ -131,15 +137,25 @@ public:
 			}
 
 		for (size_t i = 0; i < S; ++i)
-			value[i] = std::complex<double>(q[i][1] - q[i][2] * (coeff[i] / 2), q[i][2] * std::sin(omega[i]));
+			value[i] = std::complex<double>((q[i][1] - q[i][2] * coeff[i]) / scale, (q[i][2] * std::sin(omega[i])) / scale);
 	}
 
-	static auto GetPhase(std::complex<double> value)
+	static double GetPhase(const std::complex<double>& value)
 	{
 		return std::atan2(value.imag(), value.real());
 	}
-	static auto GetAmplitude(std::complex<double> value, size_t buffer_size)
+	static double GetAmplitude(const std::complex<double>& value)
 	{
-		return std::sqrt(std::pow(value.real(), 2) + std::pow(value.imag(), 2)) / buffer_size;
+		auto r = value.real();
+		auto i = value.imag();
+
+		return std::sqrt(r * r + i * i);
+	}
+	static double GetMagnitude(const std::complex<double>& value)
+	{
+		auto r = value.real();
+		auto i = value.imag();
+
+		return r * r + i * i;
 	}
 };

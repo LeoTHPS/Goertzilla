@@ -4,6 +4,33 @@
 #include <complex>
 #include <cstdint>
 
+enum GOERTZILLA_WINDOW
+{
+	GOERTZILLA_WINDOW_HAMMING          = 0b00,
+	GOERTZILLA_WINDOW_BLACKMAN_NUTTALL = 0b10,
+
+	GOERTZILLA_WINDOW_PERIODIC         = 0b01,
+	GOERTZILLA_WINDOW_SYMMETRIC        = 0b00
+};
+
+template<size_t S>
+struct GoertzillaState
+{
+	double   CFF[S];
+	double   COS[S];
+	double   SIN[S];
+	double   Frequency[S];
+	uint32_t Channel;
+	uint32_t ChannelCount;
+};
+struct GoertzillaResult
+{
+	double               Phase;
+	double               Power;
+	std::complex<double> Complex;
+	double               Magnitude;
+};
+
 class Goertzilla
 {
 	static constexpr double PI  = 3.14159265358979323846;
@@ -19,34 +46,6 @@ class Goertzilla
 	Goertzilla() = delete;
 
 public:
-	enum WINDOW
-	{
-		WINDOW_HAMMING          = 0b00,
-		WINDOW_BLACKMAN_NUTTALL = 0b10,
-
-		WINDOW_PERIODIC         = 0b01,
-		WINDOW_SYMMETRIC        = 0b00
-	};
-
-	template<size_t S>
-	struct State
-	{
-		double   CFF[S];
-		double   COS[S];
-		double   SIN[S];
-		double   Frequency[S];
-		uint32_t Channel;
-		uint32_t ChannelCount;
-	};
-
-	struct Result
-	{
-		double               Phase;
-		double               Power;
-		std::complex<double> Complex;
-		double               Magnitude;
-	};
-
 	template<typename T>
 	static auto DTMF(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
@@ -98,18 +97,18 @@ public:
 	}
 
 	template<typename T>
-	static void Window(T* buffer, size_t size, int flags)
+	static void Window(T* buffer, size_t size, uint32_t channel, uint32_t channel_count, int flags)
 	{
 		size_t n = size - (flags & 0b01);
 
 		switch (flags & 0b10)
 		{
-			case WINDOW_HAMMING:
+			case GOERTZILLA_WINDOW_HAMMING:
 				for (size_t i = 0; i < size; ++i)
 					buffer[i] *= 0.54 - 0.46 * std::cos(2 * PI * i / n);
 				break;
 
-			case WINDOW_BLACKMAN_NUTTALL:
+			case GOERTZILLA_WINDOW_BLACKMAN_NUTTALL:
 				static constexpr double A[4] = { 0.3635819, 0.4891775, 0.1365995, 0.0106411 };
 
 				for (size_t i = 0; i < size; ++i)
@@ -118,8 +117,65 @@ public:
 		}
 	}
 
+	template<typename T>
+	static void LowPass(T* buffer, size_t size, uint32_t channel, uint32_t channel_count, double coeff)
+	{
+		double state = 0;
+
+		for (size_t i = channel; i < size; i += channel_count)
+			buffer[i] = (state += coeff * ((double)buffer[i] - state));
+	}
+	template<typename T>
+	static void LowPass(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double cutoff)
+	{
+		double w     = PI2 * cutoff / sample_rate;
+		double a     = std::sin(w) / (1 + std::cos(w));
+		double state = 0;
+
+		for (size_t i = channel; i < size; i += channel_count)
+		{
+			double value = a * (double)buffer[i] + (1 - a) * state;
+
+			state     = value;
+			buffer[i] = value;
+		}
+	}
+
+	template<typename T>
+	static void HighPass(T* buffer, size_t size, uint32_t channel, uint32_t channel_count, double coeff)
+	{
+		double state[2] = {};
+
+		for (size_t i = channel; i < size; i += channel_count)
+		{
+			double value = coeff * (state[1] + (double)buffer[i] - state[0]);
+
+			state[0]  = buffer[i];
+			state[1]  = value;
+			buffer[i] = (T)value;
+		}
+	}
+	template<typename T>
+	static void HighPass(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double cutoff)
+	{
+		double dt       = 1.0 / sample_rate;
+		double w        = PI2 * cutoff * dt;
+		double a        = w / (w + 1);
+		double rc       = dt / (1 - a);
+		double state[2] = {};
+
+		for (size_t i = channel; i < size; i += channel_count)
+		{
+			double value = a * state[1] + a * ((double)buffer[i] - state[0]);
+
+			state[0]  = buffer[i];
+			state[1]  = value;
+			buffer[i] = value;
+		}
+	}
+
 	template<typename T, size_t S>
-	static void Goertzel(State<S>& state, const T* buffer, size_t size, Result(&result)[S])
+	static void Goertzel(GoertzillaState<S>& state, const T* buffer, size_t size, GoertzillaResult(&result)[S])
 	{
 		auto   n       = size / (double)state.ChannelCount;
 		double q[S][3] = {};
@@ -148,7 +204,7 @@ public:
 		}
 	}
 	template<typename T, size_t S>
-	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], Result(&result)[S])
+	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], GoertzillaResult(&result)[S])
 	{
 		auto   n        = size / (double)channel_count;
 		double q[S][3]  = {};
@@ -213,7 +269,7 @@ public:
 	template<size_t S>
 	static auto GoertzelBegin(uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S])
 	{
-		State<S> state =
+		GoertzillaState<S> state =
 		{
 			.Channel      = channel,
 			.ChannelCount = channel_count

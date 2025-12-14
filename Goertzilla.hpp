@@ -105,14 +105,14 @@ public:
 		{
 			case GOERTZILLA_WINDOW_HAMMING:
 				for (size_t i = 0; i < size; ++i)
-					buffer[i] *= 0.54 - 0.46 * std::cos(2 * PI * i / n);
+					buffer[i] *= 0.54 - 0.46 * std::cos(PI2 * i / n);
 				break;
 
 			case GOERTZILLA_WINDOW_BLACKMAN_NUTTALL:
 				static constexpr double A[4] = { 0.3635819, 0.4891775, 0.1365995, 0.0106411 };
 
 				for (size_t i = 0; i < size; ++i)
-					buffer[i] *= A[0] - A[1] * std::cos((2 * PI * size) / n) + A[1] * std::cos((4 * PI * size) / n) - A[2] * std::cos((6 * PI * size) / n);
+					buffer[i] *= A[0] - A[1] * std::cos((PI2 * size) / n) + A[1] * std::cos((4 * PI * size) / n) - A[2] * std::cos((6 * PI * size) / n);
 				break;
 		}
 	}

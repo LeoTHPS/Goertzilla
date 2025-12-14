@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <cfloat>
 #include <complex>
 #include <cstdint>
 
@@ -18,43 +19,59 @@ class Goertzilla
 	Goertzilla() = delete;
 
 public:
-	enum class WindowTypes
+	enum WINDOW
 	{
-		Hamming,
-		BlackmanNuttall
+		WINDOW_HAMMING          = 0b00,
+		WINDOW_BLACKMAN_NUTTALL = 0b10,
+
+		WINDOW_PERIODIC         = 0b01,
+		WINDOW_SYMMETRIC        = 0b00
 	};
 
-	enum class WindowModes
+	template<size_t S>
+	struct State
 	{
-		Periodic,
-		Symmetric
+		double   CFF[S];
+		double   COS[S];
+		double   SIN[S];
+		double   Frequency[S];
+		uint32_t Channel;
+		uint32_t ChannelCount;
+	};
+
+	struct Result
+	{
+		double               Phase;
+		double               Power;
+		std::complex<double> Complex;
+		double               Magnitude;
 	};
 
 	template<typename T>
 	static auto DTMF(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
-		std::complex<double> frequency[DTMF_FREQUENCY_COUNT];
-		size_t               frequency_max_offset[2]    = { 0, 0 };
-		double               frequency_max_magnitude[2] = { __DBL_MIN__, __DBL_MIN__ };
+		double frequency[DTMF_FREQUENCY_COUNT];
+		size_t frequency_max_offset[2]    = { 0, 0 };
+		double frequency_max_magnitude[2] = { DBL_MIN, DBL_MIN };
 
 		Goertzel(buffer, size, sample_rate, channel, channel_count, DTMF_FREQUENCY, frequency);
 
 		for (size_t i = 0, j = 4; i < 4; ++i, ++j)
 		{
-			if (auto magnitude = GetMagnitude(frequency[i]); magnitude > frequency_max_magnitude[0])
+			if (frequency[i] > frequency_max_magnitude[0])
 			{
 				frequency_max_offset[0]    = i;
-				frequency_max_magnitude[0] = magnitude;
+				frequency_max_magnitude[0] = frequency[i];
 			}
 
-			if (auto magnitude = GetMagnitude(frequency[j]); magnitude > frequency_max_magnitude[1])
+			if (frequency[j] > frequency_max_magnitude[1])
 			{
-				frequency_max_offset[1]    = j;
-				frequency_max_magnitude[1] = magnitude;
+				frequency_max_magnitude[1]  = frequency[j];
+				frequency_max_offset[1] = j;
 			}
 		}
 
-		magnitude = std::min(frequency_max_magnitude[0], frequency_max_magnitude[1]);
+		magnitude = (frequency_max_magnitude[0] <= frequency_max_magnitude[1]) ? frequency_max_magnitude[0] : frequency_max_magnitude[1];
 
 		return DTMF_KEY[frequency_max_offset[0]][frequency_max_offset[1] - 4];
 	}
@@ -62,17 +79,17 @@ public:
 	template<typename T>
 	static auto CTCSS(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
-		std::complex<double> frequency[CTCSS_FREQUENCY_COUNT];
-		size_t               frequency_max_offset    = 0;
-		double               frequency_max_magnitude = __DBL_MIN__;
+		double frequency[CTCSS_FREQUENCY_COUNT];
+		size_t frequency_max_offset    = 0;
+		double frequency_max_magnitude = DBL_MIN;
 
 		Goertzel(buffer, size, sample_rate, channel, channel_count, CTCSS_FREQUENCY, frequency);
 
 		for (size_t i = 0; i < CTCSS_FREQUENCY_COUNT; ++i)
-			if (auto magnitude = GetMagnitude(frequency[i]); magnitude > frequency_max_magnitude)
+			if (frequency[i] > frequency_max_magnitude)
 			{
 				frequency_max_offset    = i;
-				frequency_max_magnitude = magnitude;
+				frequency_max_magnitude = frequency[i];
 			}
 
 		magnitude = frequency_max_magnitude;
@@ -81,81 +98,138 @@ public:
 	}
 
 	template<typename T>
-	static void Window(T* buffer, size_t size, WindowTypes type, WindowModes mode)
+	static void Window(T* buffer, size_t size, int flags)
 	{
-		size_t n = size;
+		size_t n = size - (flags & 0b01);
 
-		if (mode == WindowModes::Periodic)
-			--n;
-
-		switch (type)
+		switch (flags & 0b10)
 		{
-			case WindowTypes::Hamming:
+			case WINDOW_HAMMING:
 				for (size_t i = 0; i < size; ++i)
-					buffer[i] *= 0.54 - 0.46 * cos(2 * M_PI * i / n);
+					buffer[i] *= 0.54 - 0.46 * std::cos(2 * PI * i / n);
 				break;
 
-			case WindowTypes::BlackmanNuttall:
+			case WINDOW_BLACKMAN_NUTTALL:
 				static constexpr double A[4] = { 0.3635819, 0.4891775, 0.1365995, 0.0106411 };
 
 				for (size_t i = 0; i < size; ++i)
-					buffer[i] *= A[0] - A[1] * cos((2 * PI * size) / n) + A[1] * cos((4 * PI * size) / n) - A[2] * cos((6 * PI * size) / n);
+					buffer[i] *= A[0] - A[1] * std::cos((2 * PI * size) / n) + A[1] * std::cos((4 * PI * size) / n) - A[2] * std::cos((6 * PI * size) / n);
 				break;
 		}
 	}
 
-	template<typename T>
-	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double frequency, std::complex<double>& value)
-	{
-		double               f[1] = { frequency };
-		std::complex<double> m[1] = {};
-
-		Goertzel(buffer, size, sample_rate, channel, channel_count, f, m);
-
-		value = m[0];
-	}
 	template<typename T, size_t S>
-	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], std::complex<double>(&value)[S])
+	static void Goertzel(State<S>& state, const T* buffer, size_t size, Result(&result)[S])
 	{
-		double q[S][3]  = {};
-		double coeff[S] = {};
-		double omega[S] = {};
-		double scale    = size / 2.0;
+		auto   n       = size / (double)state.ChannelCount;
+		double q[S][3] = {};
 
-		for (size_t i = 0; i < S; ++i)
-		{
-			omega[i] = (PI2 / size) * (0.5 + (size * frequency[i] / sample_rate));
-			coeff[i] = std::cos(omega[i]) * 2;
-		}
-
-		for (size_t i = 0; i < size; ++i)
+		for (size_t i = state.Channel; i < size; i += state.ChannelCount)
 			for (size_t j = 0; j < S; ++j)
 			{
-				q[j][0] = coeff[j] * q[j][1] - q[j][2] + buffer[i];
+				q[j][0] = (double)buffer[i] + state.CFF[j] * q[j][1] - q[j][2];
 				q[j][2] = q[j][1];
 				q[j][1] = q[j][0];
 			}
 
+		for (size_t j = 0; j < S; ++j)
+		{
+			auto i = q[j][1] * state.SIN[j];
+			auto r = q[j][1] * state.COS[j] - q[j][2];
+			auto c = std::complex<double>(r, i) / (double)n;
+
+			result[j] =
+			{
+				.Phase     = std::atan2(c.imag(), c.real()),
+				.Power     = (q[j][1] * q[j][1] + q[j][2] * q[j][2] - state.CFF[j] * q[j][1] * q[j][2]) / n,
+				.Complex   = c,
+				.Magnitude = std::sqrt(q[j][1] * q[j][1] + q[j][2] * q[j][2] - state.CFF[j] * q[j][1] * q[j][2]) / n
+			};
+		}
+	}
+	template<typename T, size_t S>
+	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], Result(&result)[S])
+	{
+		auto   n        = size / (double)channel_count;
+		double q[S][3]  = {};
+		double cos[S]   = {};
+		double sin[S]   = {};
+		double coeff[S] = {};
+
 		for (size_t i = 0; i < S; ++i)
-			value[i] = std::complex<double>((q[i][1] - q[i][2] * coeff[i]) / scale, (q[i][2] * std::sin(omega[i])) / scale);
+		{
+			auto w = PI2 * frequency[i] / sample_rate;
+
+			cos[i]   = std::cos(w);
+			sin[i]   = std::sin(w);
+			coeff[i] = std::cos(w) * 2;
+		}
+
+		for (size_t i = channel; i < size; i += channel_count)
+			for (size_t j = 0; j < S; ++j)
+			{
+				q[j][0] = (double)buffer[i] + coeff[j] * q[j][1] - q[j][2];
+				q[j][2] = q[j][1];
+				q[j][1] = q[j][0];
+			}
+
+		for (size_t j = 0; j < S; ++j)
+		{
+			auto i = q[j][1] * sin[j];
+			auto r = q[j][1] * cos[j] - q[j][2];
+			auto c = std::complex<double>(r, i) / (double)n;
+
+			result[j] =
+			{
+				.Phase     = std::atan2(c.imag(), c.real()),
+				.Power     = (q[j][1] * q[j][1] + q[j][2] * q[j][2] - coeff[j] * q[j][1] * q[j][2]) / n,
+				.Complex   = c,
+				.Magnitude = std::sqrt(q[j][1] * q[j][1] + q[j][2] * q[j][2] - coeff[j] * q[j][1] * q[j][2]) / n
+			};
+		}
+	}
+	template<typename T, size_t S>
+	static void Goertzel(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], double(&magnitude)[S])
+	{
+		auto   n        = size / (double)channel_count;
+		double q[S][3]  = {};
+		double coeff[S] = {};
+
+		for (size_t i = 0; i < S; ++i)
+			coeff[i] = 2 * std::cos(PI2 * frequency[i] / sample_rate);
+
+		for (size_t i = channel; i < size; i += channel_count)
+			for (size_t j = 0; j < S; ++j)
+			{
+				q[j][0] = (double)buffer[i] + coeff[j] * q[j][1] - q[j][2];
+				q[j][2] = q[j][1];
+				q[j][1] = q[j][0];
+			}
+
+		for (size_t j = 0; j < S; ++j)
+			magnitude[j] = std::sqrt(q[j][1] * q[j][1] + q[j][2] * q[j][2] - coeff[j] * q[j][1] * q[j][2]) / n;
 	}
 
-	static double GetPhase(const std::complex<double>& value)
+	template<size_t S>
+	static auto GoertzelBegin(uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S])
 	{
-		return std::atan2(value.imag(), value.real());
-	}
-	static double GetAmplitude(const std::complex<double>& value)
-	{
-		auto r = value.real();
-		auto i = value.imag();
+		State<S> state =
+		{
+			.Channel      = channel,
+			.ChannelCount = channel_count
+		};
 
-		return std::sqrt(r * r + i * i);
-	}
-	static double GetMagnitude(const std::complex<double>& value)
-	{
-		auto r = value.real();
-		auto i = value.imag();
+		memcpy(state.Frequency, frequency, S * sizeof(double));
 
-		return r * r + i * i;
+		for (size_t i = 0; i < S; ++i)
+		{
+			auto w = PI2 * frequency[i] / sample_rate;
+
+			state.COS[i] = std::cos(w);
+			state.SIN[i] = std::sin(w);
+			state.CFF[i] = std::cos(w) * 2;
+		}
+
+		return state;
 	}
 };

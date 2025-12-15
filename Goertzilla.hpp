@@ -6,11 +6,12 @@
 
 enum GOERTZILLA_WINDOW
 {
-	GOERTZILLA_WINDOW_HAMMING          = 0b00,
-	GOERTZILLA_WINDOW_BLACKMAN_NUTTALL = 0b10,
+	GOERTZILLA_WINDOW_PERIODIC         = 0b001,
+	GOERTZILLA_WINDOW_SYMMETRIC        = 0b000,
 
-	GOERTZILLA_WINDOW_PERIODIC         = 0b01,
-	GOERTZILLA_WINDOW_SYMMETRIC        = 0b00
+	GOERTZILLA_WINDOW_FLATTOP          = 0b010,
+	GOERTZILLA_WINDOW_HAMMING          = 0b100,
+	GOERTZILLA_WINDOW_BLACKMAN_NUTTALL = 0b110
 };
 
 template<size_t S>
@@ -99,21 +100,40 @@ public:
 	template<typename T>
 	static void Window(T* buffer, size_t size, uint32_t channel, uint32_t channel_count, int flags)
 	{
-		size_t n = size - (flags & 0b01);
+		size_t n = size - (flags & 1);
 
-		switch (flags & 0b10)
+		switch (flags & 0b110)
 		{
+			case GOERTZILLA_WINDOW_FLATTOP:
+			{
+				static constexpr double A[5] = { 0.21557895, 0.41663158, 0.277263158, 0.083578947, 0.006947368 };
+
+				for (size_t i = channel; i < size; i += channel_count)
+				{
+					double w = PI2 * i / n;
+
+					buffer[i] *= A[0] - A[1] * std::cos(w) + A[2] * std::cos(2 * w) - A[3] * std::cos(3 * w) + A[4] * std::cos(4 * w);
+				}
+			}
+			break;
+
 			case GOERTZILLA_WINDOW_HAMMING:
 				for (size_t i = channel; i < size; i += channel_count)
 					buffer[i] *= 0.54 - 0.46 * std::cos(PI2 * i / n);
 				break;
 
 			case GOERTZILLA_WINDOW_BLACKMAN_NUTTALL:
+			{
 				static constexpr double A[4] = { 0.3635819, 0.4891775, 0.1365995, 0.0106411 };
 
 				for (size_t i = channel; i < size; i += channel_count)
-					buffer[i] *= A[0] - A[1] * std::cos((PI2 * size) / n) + A[1] * std::cos((4 * PI * size) / n) - A[2] * std::cos((6 * PI * size) / n);
-				break;
+				{
+					double w = PI2 * i / n;
+
+					buffer[i] *= A[0] - A[1] * std::cos(w) + A[2] * std::cos(2 * w) - A[3] * std::cos(3 * w);
+				}
+			}
+			break;
 		}
 	}
 
@@ -129,15 +149,15 @@ public:
 	template<typename T>
 	static void HighPass(T* buffer, size_t size, uint32_t channel, uint32_t channel_count, double coeff)
 	{
-		double state[2] = {};
+		double state[2][2] = {};
 
 		for (size_t i = channel; i < size; i += channel_count)
 		{
-			double value = coeff * (state[1] + (double)buffer[i] - state[0]);
-
-			state[0]  = buffer[i];
-			state[1]  = value;
-			buffer[i] = (T)value;
+			state[0][0] = (double)buffer[i];
+			state[0][1] = (1 - coeff) * (state[1][1] + state[0][0] - state[1][0]);
+			buffer[i]   = state[0][1];
+			state[1][0] = state[0][0];
+			state[1][1] = state[0][1];
 		}
 	}
 

@@ -15,10 +15,10 @@ int main(int argc, char* argv[])
 	for (size_t i = CHANNEL_INDEX; i < SAMPLE_COUNT; i += CHANNEL_COUNT)
 	{
 		auto j        = (i / CHANNEL_COUNT) / (double)SAMPLE_RATE;
-		auto dtmf_1   = sin(2 * M_PI * 697 * j) + sin(2 * M_PI * 1209 * j);
-		auto ctcss_67 = sin(2 * M_PI * 67 * j);
+		auto dtmf_1   = (0.25 * sin(2 * M_PI * 697 * j)) + (0.25 * sin(2 * M_PI * 1209 * j));
+		auto ctcss_67 = 0.5 * sin(2 * M_PI * 67 * j);
 
-		samples[i] = (0.5 * (dtmf_1 + ctcss_67)) * INT16_MAX;
+		samples[i] = (dtmf_1 + ctcss_67) * INT16_MAX;
 	}
 
 	char   dtmf;  double dtmf_magnitude;

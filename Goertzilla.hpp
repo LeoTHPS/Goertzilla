@@ -104,14 +104,14 @@ public:
 		switch (flags & 0b10)
 		{
 			case GOERTZILLA_WINDOW_HAMMING:
-				for (size_t i = 0; i < size; ++i)
+				for (size_t i = channel; i < size; i += channel_count)
 					buffer[i] *= 0.54 - 0.46 * std::cos(PI2 * i / n);
 				break;
 
 			case GOERTZILLA_WINDOW_BLACKMAN_NUTTALL:
 				static constexpr double A[4] = { 0.3635819, 0.4891775, 0.1365995, 0.0106411 };
 
-				for (size_t i = 0; i < size; ++i)
+				for (size_t i = channel; i < size; i += channel_count)
 					buffer[i] *= A[0] - A[1] * std::cos((PI2 * size) / n) + A[1] * std::cos((4 * PI * size) / n) - A[2] * std::cos((6 * PI * size) / n);
 				break;
 		}
@@ -124,21 +124,6 @@ public:
 
 		for (size_t i = channel; i < size; i += channel_count)
 			buffer[i] = (state += coeff * ((double)buffer[i] - state));
-	}
-	template<typename T>
-	static void LowPass(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double cutoff)
-	{
-		double w     = PI2 * cutoff / sample_rate;
-		double a     = std::sin(w) / (1 + std::cos(w));
-		double state = 0;
-
-		for (size_t i = channel; i < size; i += channel_count)
-		{
-			double value = a * (double)buffer[i] + (1 - a) * state;
-
-			state     = value;
-			buffer[i] = value;
-		}
 	}
 
 	template<typename T>
@@ -153,24 +138,6 @@ public:
 			state[0]  = buffer[i];
 			state[1]  = value;
 			buffer[i] = (T)value;
-		}
-	}
-	template<typename T>
-	static void HighPass(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double cutoff)
-	{
-		double dt       = 1.0 / sample_rate;
-		double w        = PI2 * cutoff * dt;
-		double a        = w / (w + 1);
-		double rc       = dt / (1 - a);
-		double state[2] = {};
-
-		for (size_t i = channel; i < size; i += channel_count)
-		{
-			double value = a * state[1] + a * ((double)buffer[i] - state[0]);
-
-			state[0]  = buffer[i];
-			state[1]  = value;
-			buffer[i] = value;
 		}
 	}
 

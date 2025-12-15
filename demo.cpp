@@ -12,14 +12,10 @@ int16_t samples[SAMPLE_COUNT] = {};
 
 int main(int argc, char* argv[])
 {
-	for (size_t i = CHANNEL_INDEX; i < SAMPLE_COUNT; i += CHANNEL_COUNT)
-	{
-		auto j        = (i / CHANNEL_COUNT) / (double)SAMPLE_RATE;
-		auto dtmf_1   = (0.25 * sin(2 * M_PI * 697 * j)) + (0.25 * sin(2 * M_PI * 1209 * j));
-		auto ctcss_67 = 0.5 * sin(2 * M_PI * 67 * j);
+	double f[] = { 697,  1209, 67 };
+	double a[] = { 0.25, 0.25, 0.25 };
 
-		samples[i] = (dtmf_1 + ctcss_67) * INT16_MAX;
-	}
+	Goertzilla::GenerateSineWave(samples, SAMPLE_COUNT, SAMPLE_RATE, CHANNEL_INDEX, CHANNEL_COUNT, f, a);
 
 	char   dtmf;  double dtmf_magnitude;
 	double ctcss; double ctcss_magnitude;

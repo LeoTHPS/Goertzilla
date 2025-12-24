@@ -7,7 +7,7 @@
 #define CHANNEL_COUNT 1
 #define CHANNEL_INDEX 0
 
-int16_t samples[SAMPLE_COUNT] = {};
+int16_t samples[SAMPLE_COUNT];
 
 void samples_init()
 {

@@ -277,12 +277,36 @@ public:
 	}
 
 	template<typename T>
+	static void GenerateSineWave(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double frequency)
+	{
+		GenerateSineWave(buffer, size, sample_rate, channel, channel_count, frequency, 1);
+	}
+	template<typename T>
 	static void GenerateSineWave(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double frequency, double amplitude)
 	{
 		double coeff = PI2 * frequency / sample_rate;
 
 		for (size_t i = channel; i < size; i += channel_count)
 			buffer[i] = (std::sin(coeff * i) * amplitude) * std::numeric_limits<T>::max();
+	}
+	template<typename T, size_t S>
+	static void GenerateSineWave(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S])
+	{
+		double coeff[S];
+		double amplitude = 1.0 / S;
+
+		for (size_t i = 0; i < S; ++i)
+			coeff[i] = PI2 * frequency[i] / sample_rate;
+
+		for (size_t i = channel; i < size; i += channel_count)
+		{
+			double s = 0;
+
+			for (size_t j = 0; j < S; ++j)
+				s += std::sin(coeff[j] * i) * amplitude;
+
+			buffer[i] = s * std::numeric_limits<T>::max();
+		}
 	}
 	template<typename T, size_t S>
 	static void GenerateSineWave(T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S], const double(&amplitude)[S])

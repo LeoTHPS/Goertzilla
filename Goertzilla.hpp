@@ -47,6 +47,39 @@ class Goertzilla
 	Goertzilla() = delete;
 
 public:
+	template<size_t S>
+	using State      = GoertzillaState<S>;
+	using StateDTMF  = State<DTMF_FREQUENCY_COUNT>;
+	using StateCTCSS = State<CTCSS_FREQUENCY_COUNT>;
+
+	template<typename T>
+	static auto DTMF(const StateDTMF& state, const T* buffer, size_t size, double& magnitude)
+	{
+		double frequency[DTMF_FREQUENCY_COUNT];
+		size_t frequency_max_offset[2]    = { 0, 0 };
+		double frequency_max_magnitude[2] = { DBL_MIN, DBL_MIN };
+
+		Goertzel(state, buffer, size, frequency);
+
+		for (size_t i = 0, j = 4; i < 4; ++i, ++j)
+		{
+			if (frequency[i] > frequency_max_magnitude[0])
+			{
+				frequency_max_offset[0]    = i;
+				frequency_max_magnitude[0] = frequency[i];
+			}
+
+			if (frequency[j] > frequency_max_magnitude[1])
+			{
+				frequency_max_magnitude[1]  = frequency[j];
+				frequency_max_offset[1] = j;
+			}
+		}
+
+		magnitude = (frequency_max_magnitude[0] <= frequency_max_magnitude[1]) ? frequency_max_magnitude[0] : frequency_max_magnitude[1];
+
+		return DTMF_KEY[frequency_max_offset[0]][frequency_max_offset[1] - 4];
+	}
 	template<typename T>
 	static auto DTMF(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
@@ -76,6 +109,26 @@ public:
 		return DTMF_KEY[frequency_max_offset[0]][frequency_max_offset[1] - 4];
 	}
 
+	template<typename T>
+	static auto CTCSS(const StateCTCSS& state, const T* buffer, size_t size, double& magnitude)
+	{
+		double frequency[CTCSS_FREQUENCY_COUNT];
+		size_t frequency_max_offset    = 0;
+		double frequency_max_magnitude = DBL_MIN;
+
+		Goertzel(state, buffer, size, frequency);
+
+		for (size_t i = 0; i < CTCSS_FREQUENCY_COUNT; ++i)
+			if (frequency[i] > frequency_max_magnitude)
+			{
+				frequency_max_offset    = i;
+				frequency_max_magnitude = frequency[i];
+			}
+
+		magnitude = frequency_max_magnitude;
+
+		return CTCSS_FREQUENCY[frequency_max_offset];
+	}
 	template<typename T>
 	static auto CTCSS(const T* buffer, size_t size, uint32_t sample_rate, uint32_t channel, uint32_t channel_count, double& magnitude)
 	{
@@ -162,7 +215,24 @@ public:
 	}
 
 	template<typename T, size_t S>
-	static void Goertzel(GoertzillaState<S>& state, const T* buffer, size_t size, GoertzillaResult(&result)[S])
+	static void Goertzel(const State<S>& state, const T* buffer, size_t size, double(&magnitude)[S])
+	{
+		auto   n       = size / (double)state.ChannelCount;
+		double q[S][3] = {};
+
+		for (size_t i = state.Channel; i < size; i += state.ChannelCount)
+			for (size_t j = 0; j < S; ++j)
+			{
+				q[j][0] = (double)buffer[i] + state.CFF[j] * q[j][1] - q[j][2];
+				q[j][2] = q[j][1];
+				q[j][1] = q[j][0];
+			}
+
+		for (size_t j = 0; j < S; ++j)
+			magnitude[j] = std::sqrt(q[j][1] * q[j][1] + q[j][2] * q[j][2] - state.CFF[j] * q[j][1] * q[j][2]) / n;
+	}
+	template<typename T, size_t S>
+	static void Goertzel(const State<S>& state, const T* buffer, size_t size, GoertzillaResult(&result)[S])
 	{
 		auto   n       = size / (double)state.ChannelCount;
 		double q[S][3] = {};
@@ -256,7 +326,7 @@ public:
 	template<size_t S>
 	static auto GoertzelBegin(uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S])
 	{
-		GoertzillaState<S> state =
+		State<S> state =
 		{
 			.Channel      = channel,
 			.ChannelCount = channel_count
@@ -274,6 +344,14 @@ public:
 		}
 
 		return state;
+	}
+	static auto GoertzelBeginDTMF(uint32_t sample_rate, uint32_t channel, uint32_t channel_count)
+	{
+		return GoertzelBegin(sample_rate, channel, channel_count, DTMF_FREQUENCY);
+	}
+	static auto GoertzelBeginCTCSS(uint32_t sample_rate, uint32_t channel, uint32_t channel_count)
+	{
+		return GoertzelBegin(sample_rate, channel, channel_count, CTCSS_FREQUENCY);
 	}
 
 	template<typename T>

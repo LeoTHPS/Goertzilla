@@ -324,7 +324,7 @@ public:
 	}
 
 	template<size_t S>
-	static auto GoertzelBegin(uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S])
+	static auto Begin(uint32_t sample_rate, uint32_t channel, uint32_t channel_count, const double(&frequency)[S])
 	{
 		State<S> state =
 		{
@@ -345,13 +345,13 @@ public:
 
 		return state;
 	}
-	static auto GoertzelBeginDTMF(uint32_t sample_rate, uint32_t channel, uint32_t channel_count)
+	static auto BeginDTMF(uint32_t sample_rate, uint32_t channel, uint32_t channel_count)
 	{
-		return GoertzelBegin(sample_rate, channel, channel_count, DTMF_FREQUENCY);
+		return Begin(sample_rate, channel, channel_count, DTMF_FREQUENCY);
 	}
-	static auto GoertzelBeginCTCSS(uint32_t sample_rate, uint32_t channel, uint32_t channel_count)
+	static auto BeginCTCSS(uint32_t sample_rate, uint32_t channel, uint32_t channel_count)
 	{
-		return GoertzelBegin(sample_rate, channel, channel_count, CTCSS_FREQUENCY);
+		return Begin(sample_rate, channel, channel_count, CTCSS_FREQUENCY);
 	}
 
 	template<typename T>

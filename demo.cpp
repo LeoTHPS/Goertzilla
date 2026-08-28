@@ -2,34 +2,38 @@
 
 #include "Goertzilla.hpp"
 
-#define SAMPLE_RATE   11025
-#define SAMPLE_COUNT  512
-#define CHANNEL_COUNT 1
-#define CHANNEL_INDEX 0
+#define SAMPLE_RATE  11025
+#define SAMPLE_COUNT 512
 
-int16_t samples[SAMPLE_COUNT];
+float       samples[SAMPLE_COUNT] = {};
+const float frequency[]           = {      200      };
+const float frequency_test[]      = { 100, 200, 300 };
 
 void samples_init()
 {
-	double f[] = { 697,  1209, 100  };
-	double a[] = { 0.25, 0.25, 0.25 };
+	size_t freq_count     = sizeof(frequency) / sizeof(frequency[0]);
+	double freq_amplitude = 1.0 / freq_count;
 
-	Goertzilla::GenerateSineWave(samples, SAMPLE_COUNT, SAMPLE_RATE, CHANNEL_INDEX, CHANNEL_COUNT, f, a);
-	Goertzilla::Window(samples, SAMPLE_COUNT, CHANNEL_INDEX, CHANNEL_COUNT, GOERTZILLA_WINDOW_HAMMING | GOERTZILLA_WINDOW_SYMMETRIC);
+	for (size_t i = 0; i < SAMPLE_COUNT; ++i)
+	{
+		double coeff = GOERTZILLA_PI2 * frequency[i] / SAMPLE_RATE;
+
+		for (size_t j = 0; j < freq_count; ++j)
+			samples[i] += std::sin(coeff * i) * freq_amplitude;
+	}
 }
 
 int main(int argc, char* argv[])
 {
 	samples_init();
 
-	char   dtmf;  double dtmf_magnitude;
-	double ctcss; double ctcss_magnitude;
+	Goertzilla               g(SAMPLE_RATE, frequency_test);
+	Goertzilla::ResultsPower g_results;
 
-	dtmf  = Goertzilla::DTMF(samples, SAMPLE_COUNT, SAMPLE_RATE, CHANNEL_INDEX, CHANNEL_COUNT, dtmf_magnitude);
-	ctcss = Goertzilla::CTCSS(samples, SAMPLE_COUNT, SAMPLE_RATE, CHANNEL_INDEX, CHANNEL_COUNT, ctcss_magnitude);
+	g.Calculate(g_results, samples, SAMPLE_COUNT, 0, 1);
 
-	std::cout << "DTMF: "  << dtmf  << " - " << dtmf_magnitude  << std::endl;
-	std::cout << "CTCSS: " << ctcss << " - " << ctcss_magnitude << std::endl;
+	for (size_t i = 0; i < g_results.size(); ++i)
+		std::cout << frequency_test[i] << " -> " << g_results[i].Value << std::endl;
 
 	return 0;
 }

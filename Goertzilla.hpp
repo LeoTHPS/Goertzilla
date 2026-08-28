@@ -3,6 +3,9 @@
 #include <complex>
 #include <cstdint>
 
+#define GOERTZILLA_PI  3.14159265358979323846
+#define GOERTZILLA_PI2 6.28318530717958647692
+
 class Goertzilla
 {
 	std::vector<double> sine;
